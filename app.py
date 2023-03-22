@@ -41,11 +41,12 @@ DB.create_tables([Prediction], safe=True)
 
 with open('columns.json') as fh:
     columns = json.load(fh)
-
+    print('------------------columns')
 pipeline = joblib.load('pipeline.pickle')
 
 with open('dtypes.pickle', 'rb') as fh:
     dtypes = pickle.load(fh)
+    print('------------------dtypes')
 
 
 # End model un-pickling
@@ -62,19 +63,45 @@ app = Flask(__name__)
 def predict():
     # Flask provides a deserialization convenience function called
     # get_json that will work if the mimetype is application/json.
-    obs_dict = request.get_json()
-    _id = obs_dict['id']
-    observation = obs_dict['observation']
-    # Now do what we already learned in the notebooks about how to transform
-    # a single observation into a dataframe that will work with a pipeline.
-    obs = pd.DataFrame([observation], columns=columns).astype(dtypes)
+        # Deserialize JSON payload
+    try:
+        payload = request.get_json()
+        print('------------------here')
+    except json.JSONDecodeError:
+        return jsonify({'error': 'Invalid JSON payload'}), 400
+    
+    # Extract id and observation from payload
+
+    try:
+        _id = payload['id']
+        observation = payload['observation']
+    except KeyError:
+        return jsonify({'error': 'Missing id or observation field in JSON payload'}), 400
+
+    # Validate observation
+    """try:
+        obs = pd.DataFrame([observation], columns=columns).astype(dtypes)
+    except (KeyError, TypeError):
+        return jsonify({'error': 'Observation is invalid!'}), 400"""
+    
+    try:
+        # Convert observation to pandas DataFrame
+        obs = pd.DataFrame([observation], columns=columns)
+        for col, dtype in dtypes.items():
+            if obs[col].dtype != dtype:
+                raise ValueError
+        obs = obs.astype(dtypes)
+    except (KeyError, ValueError, TypeError):
+        return jsonify({'error': 'Observation is invalid!'}), 400
+
+
     # Now get ourselves an actual prediction of the positive class.
     proba = pipeline.predict_proba(obs)[0, 1]
     response = {'proba': proba}
     p = Prediction(
         observation_id=_id,
         proba=proba,
-        observation=request.data
+        observation=request.data #json.dumps(observation)
     )
     try:
         p.save()
